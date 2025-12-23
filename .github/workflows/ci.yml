@@ -1,0 +1,60 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Maven local repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+
+      - name: Run tests & generate JaCoCo report
+        run: mvn -B clean test jacoco:report
+
+      - name: Upload JaCoCo report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+
+      - name: Fail if coverage < 80%
+        shell: bash
+        run: |
+          if [ ! -f target/site/jacoco/jacoco.xml ]; then
+            echo "Jacoco report not found"; exit 1
+          fi
+          COVERAGE=$(python - <<'PY'
+import xml.etree.ElementTree as ET
+try:
+    tree=ET.parse('target/site/jacoco/jacoco.xml')
+    root=tree.getroot()
+    for c in root.iter('counter'):
+        if c.get('type')=='INSTRUCTION':
+            missed=int(c.get('missed'))
+            covered=int(c.get('covered'))
+            total=missed+covered
+            pct = (covered*100)//total if total else 0
+            print(pct)
+            break
+except Exception as e:
+    print(0)
+PY
+)
+          echo "Coverage: ${COVERAGE}%"
+          if [ "$COVERAGE" -lt 80 ]; then
+            echo "Coverage ${COVERAGE}% is below threshold 80%"; exit 1
+          fi
